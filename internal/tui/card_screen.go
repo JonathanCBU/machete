@@ -10,7 +10,7 @@ import (
 // row is opened. This is the one piece of domain knowledge CardScreen
 // needs — everything else about layout, navigation, and the modal is
 // generic and reusable across item types.
-type CardRenderer[T any] func(item T) (title, summary, detail string)
+type CardRenderer[T any] func(item T) (title, detail string)
 
 // CardScreen is a navigable list of "cards" that expand into a modal with
 // more detail on Enter. Instantiate it with any T (profiles, servers,
@@ -21,13 +21,11 @@ type CardScreen[T any] struct {
 	hotkey rune
 	render CardRenderer[T]
 	list   *tview.List
-	app    *tview.Application
-	pages  *tview.Pages
+	app    *App
 }
 
 func NewCardScreen[T any](
-	app *tview.Application,
-	pages *tview.Pages,
+	app *App,
 	name string,
 	hotkey rune,
 	items []T,
@@ -38,11 +36,12 @@ func NewCardScreen[T any](
 		hotkey: hotkey,
 		render: render,
 		app:    app,
-		pages:  pages,
-		list:   tview.NewList().ShowSecondaryText(true),
+		list:   tview.NewList(),
 	}
 	s.list.SetBorder(true).SetTitle(" " + name + " ")
-	s.list.SetInputCapture(vimNavCapture)
+	// vimNavCapture handles j/k/g/G; escToMenu returns focus to the
+	// sidebar on Esc. Chained so both work together on the same list.
+	s.list.SetInputCapture(chainCapture(vimNavCapture, escToMenu(app)))
 	s.SetItems(items)
 	return s
 }
@@ -53,8 +52,9 @@ func NewCardScreen[T any](
 func (s *CardScreen[T]) SetItems(items []T) {
 	s.list.Clear()
 	for _, item := range items {
-		title, summary, detail := s.render(item)
-		s.list.AddItem(title, summary, 0, func() {
+		item := item // capture for closure
+		title, detail := s.render(item)
+		s.list.AddItem(title, "", 0, func() {
 			s.showModal(title, detail)
 		})
 	}
@@ -67,18 +67,18 @@ func (s *CardScreen[T]) showModal(title, detail string) {
 	modalName := s.name + "-modal"
 	text.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEsc || event.Key() == tcell.KeyEnter {
-			s.pages.RemovePage(modalName)
-			s.app.SetFocus(s.list)
+			s.app.Pages().RemovePage(modalName)
+			s.app.Application().SetFocus(s.list)
 			return nil
 		}
 		return event
 	})
 
-	s.pages.AddPage(modalName, centerModal(text, 40, 10), true, true)
-	s.app.SetFocus(text)
+	s.app.Pages().AddPage(modalName, centerModal(text, 40, 10), true, true)
+	s.app.Application().SetFocus(text)
 }
 
 func (s *CardScreen[T]) Primitive() tview.Primitive { return s.list }
 func (s *CardScreen[T]) Name() string               { return s.name }
 func (s *CardScreen[T]) Hotkey() rune               { return s.hotkey }
-func (s *CardScreen[T]) OnShow()                    { s.app.SetFocus(s.list) }
+func (s *CardScreen[T]) OnShow()                    { s.app.Application().SetFocus(s.list) }

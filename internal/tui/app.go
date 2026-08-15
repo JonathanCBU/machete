@@ -1,20 +1,18 @@
 package tui
 
 import (
-	"fmt"
-
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
 // App wires together the sidebar menu, the Pages content area, and the
 // hotkey routing between them. Screens are registered dynamically, so the
-// menu text and key handling never need hardcoded switch statements —
-// adding a screen in main.go is enough to make it navigable.
+// menu and key handling never need hardcoded switch statements — adding
+// a screen in main.go is enough to make it navigable.
 type App struct {
 	app     *tview.Application
 	pages   *tview.Pages
-	menu    *tview.TextView
+	menu    *tview.List
 	root    *tview.Flex
 	screens []Screen
 	byKey   map[rune]Screen
@@ -24,10 +22,15 @@ func NewApp() *App {
 	a := &App{
 		app:   tview.NewApplication(),
 		pages: tview.NewPages(),
-		menu:  tview.NewTextView().SetDynamicColors(true),
+		menu:  tview.NewList().ShowSecondaryText(false),
 		byKey: map[rune]Screen{},
 	}
-	a.menu.SetBorder(true).SetTitle(" Menu ")
+	a.menu.SetBorder(true).SetTitle(" Menu (q: quit) ")
+	// The menu is navigable the same way card screens are: j/k/g/G plus
+	// arrows via List's own defaults. Esc has no meaning on the menu
+	// itself, so it isn't chained here (unlike on the content screens).
+	a.menu.SetInputCapture(vimNavCapture)
+
 	a.root = tview.NewFlex().
 		AddItem(a.menu, 20, 0, false).
 		AddItem(a.pages, 0, 1, true)
@@ -40,22 +43,35 @@ func NewApp() *App {
 func (a *App) Application() *tview.Application { return a.app }
 func (a *App) Pages() *tview.Pages             { return a.pages }
 
-// Register adds a screen, wires its hotkey, and refreshes the menu text.
-// The first registered screen is shown by default.
+// FocusMenu moves focus to the sidebar. Screens wire this to Esc via
+// escToMenu so pressing Esc from a screen's own primitive returns here.
+func (a *App) FocusMenu() {
+	a.app.SetFocus(a.menu)
+}
+
+// switchTo makes s the visible page and focuses its content. Shared by
+// both the menu's Enter handler and the global hotkey capture so there's
+// one place that defines what "switching to a screen" means.
+func (a *App) switchTo(s Screen) {
+	a.pages.SwitchToPage(s.Name())
+	s.OnShow()
+}
+
+// Register adds a screen: wires its hotkey, adds it to Pages, and adds a
+// corresponding row to the menu List. The first registered screen is
+// shown by default.
 func (a *App) Register(s Screen) {
 	a.screens = append(a.screens, s)
 	a.byKey[s.Hotkey()] = s
 	a.pages.AddPage(s.Name(), s.Primitive(), true, len(a.screens) == 1)
-	a.rebuildMenu()
-}
 
-func (a *App) rebuildMenu() {
-	text := "[yellow]Navigation[-]\n\n"
-	for _, s := range a.screens {
-		text += fmt.Sprintf("[green]%c[-]  %s\n", s.Hotkey(), s.Name())
-	}
-	text += "\n[yellow]General[-]\n\n[green]q[-]  Quit\n"
-	a.menu.SetText(text)
+	// The shortcut rune makes List show e.g. "h) Home" and also lets
+	// pressing that rune while the menu is focused jump straight to it —
+	// on top of the global hotkey capture in Run, which works from
+	// anywhere regardless of focus.
+	a.menu.AddItem(s.Name(), "", s.Hotkey(), func() {
+		a.switchTo(s)
+	})
 }
 
 func (a *App) Run() error {
@@ -65,11 +81,12 @@ func (a *App) Run() error {
 			return nil
 		}
 		if s, ok := a.byKey[event.Rune()]; ok {
-			a.pages.SwitchToPage(s.Name())
-			s.OnShow()
+			a.switchTo(s)
 			return nil
 		}
 		return event
 	})
-	return a.app.SetRoot(a.root, true).SetFocus(a.pages).Run()
+	// Start focused on the menu — it's now the natural entry point:
+	// navigate with j/k, Enter into a screen, Esc back out to here.
+	return a.app.SetRoot(a.root, true).SetFocus(a.menu).Run()
 }

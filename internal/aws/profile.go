@@ -69,3 +69,7 @@ func (p *Profile) ToString() string {
 	}
 	return b.String()
 }
+
+func RenderProfile(p Profile) (string, string) {
+	return p.Name, p.ToString()
+}
