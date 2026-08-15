@@ -3,6 +3,7 @@ module github.com/JonathanCBU/machete
 go 1.25.1
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/gdamore/tcell/v2 v2.8.1
 	github.com/rivo/tview v0.42.1-0.20260811193840-c15b79fa47f2
 )

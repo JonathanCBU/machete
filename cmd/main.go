@@ -1,46 +1,40 @@
 package main
 
 import (
-	"fmt"
+	"io"
 	"log"
+	"os"
 
+	"github.com/JonathanCBU/machete/internal/aws"
+	"github.com/JonathanCBU/machete/internal/config"
 	"github.com/JonathanCBU/machete/internal/tui"
 	"github.com/rivo/tview"
 )
 
-// Profile is domain data — tui knows nothing about this type. It only
-// needs to satisfy whatever CardRenderer[Profile] below extracts from it.
-type Profile struct {
-	Name     string
-	Role     string
-	Region   string
-	Status   string
-	LastSeen string
-}
-
-// fetchProfiles stands in for wherever your real data comes from — an API
-// call, a DB query, a file watch. Because CardScreen.SetItems can be
-// called any time, this could just as easily run on a timer or in
-// response to a keypress to refresh the screen live.
-func fetchProfiles() []Profile {
-	return []Profile{
-		{"Alice Chen", "Backend", "us-east-1", "Active", "2m ago"},
-		{"Bob Martins", "Frontend", "eu-west-1", "Active", "14m ago"},
-		{"Carla Diaz", "SRE", "ap-south-1", "On call", "just now"},
-	}
-}
-
-func renderProfile(p Profile) (title, summary, detail string) {
+// renderProfile is now a CardRenderer[aws.Profile] — T is inferred from
+// the slice passed to NewCardScreen below, so nothing in tui needs to
+// change to accept a different concrete type here.
+func renderProfile(p aws.Profile) (title, summary, detail string) {
 	title = p.Name
-	summary = p.Role + " • " + p.Region
-	detail = fmt.Sprintf(
-		"\nRole: %s\nRegion: %s\nStatus: %s\nLast seen: %s",
-		p.Role, p.Region, p.Status, p.LastSeen,
-	)
+	summary = p.Attributes["region"]
+	detail = p.ToString()
 	return
 }
 
 func main() {
+	logFile, _ := os.OpenFile("/tmp/tview-app.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	defer logFile.Close()
+
+	conf, err := config.GetConfig()
+	if err != nil {
+		log.Fatal("failed to read config", err)
+	}
+
+	awsConf, err := aws.GetAwsConfig(conf.Aws)
+	if err != nil {
+		log.Fatal("failed to read aws config", err)
+	}
+
 	app := tui.NewApp()
 
 	home := tview.NewTextView().
@@ -51,13 +45,20 @@ func main() {
 	profiles := tui.NewCardScreen(
 		app.Application(), app.Pages(),
 		"Profiles", 'p',
-		fetchProfiles(), renderProfile,
+		awsConf.Profiles, renderProfile,
 	)
 	app.Register(profiles)
 
-	logs := tview.NewTextView().
-		SetText("Logs view.\n\nTail output would go here.").
-		SetDynamicColors(true)
+	logs := tview.NewTextView().SetDynamicColors(true)
+	log.SetOutput(io.MultiWriter(logFile, tui.NewLogWriter(app.Application(), logs)))
+
+	logs.SetBorder(true).SetTitle(" Logs ")
+	app.Register(tui.NewStaticScreen(app.Application(), "Logs", 'l', logs))
+
+	log.SetOutput(tui.NewLogWriter(app.Application(), logs))
+	log.SetFlags(log.Ltime)
+
+	log.Printf("loaded %d profiles", len(awsConf.Profiles))
 	logs.SetBorder(true).SetTitle(" Logs ")
 	app.Register(tui.NewStaticScreen(app.Application(), "Logs", 'l', logs))
 

@@ -42,6 +42,7 @@ func NewCardScreen[T any](
 		list:   tview.NewList().ShowSecondaryText(true),
 	}
 	s.list.SetBorder(true).SetTitle(" " + name + " ")
+	s.list.SetInputCapture(vimNavCapture)
 	s.SetItems(items)
 	return s
 }
